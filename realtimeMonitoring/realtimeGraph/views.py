@@ -585,6 +585,85 @@ def get_map_json(request, **kwargs):
 
     return JsonResponse(data_result)
 
+# Json con datos de cantidad de registros en la tabla vs cantidad de datos
+def get_map_json_rows_samples(request, **kwargs):
+    data_result = {}
+
+    measureParam = kwargs.get("measure", None)
+    selectedMeasure = None
+    measurements = Measurement.objects.all()
+
+    if measureParam != None:
+        selectedMeasure = Measurement.objects.filter(name=measureParam)[0]
+    elif measurements.count() > 0:
+        selectedMeasure = measurements[0]
+
+    locations = Location.objects.all()
+    try:
+        start = datetime.fromtimestamp(
+            float(request.GET.get("from", None)) / 1000
+        )
+    except:
+        start = None
+    try:
+        end = datetime.fromtimestamp(
+            float(request.GET.get("to", None)) / 1000)
+    except:
+        end = None
+    if start == None and end == None:
+        start = datetime.now()
+        start = start - dateutil.relativedelta.relativedelta(weeks=1)
+        end = datetime.now()
+        end += dateutil.relativedelta.relativedelta(days=1)
+    elif end == None:
+        end = datetime.now()
+    elif start == None:
+        start = datetime.fromtimestamp(0)
+
+    data = []
+    #Contando las filas y las muestras de cada ubicación para la medida seleccionada en el rango de fechas indicado
+    total_rows = 0
+    total_samples = 0
+
+    for location in locations:
+        stations = Station.objects.filter(location=location)
+        locationData = Data.objects.filter(
+            station__in=stations, measurement__name=selectedMeasure.name,  time__gte=start.date(), time__lte=end.date())
+        count_rows = locationData.count()
+
+        if count_rows <= 0:
+            continue
+        minVal = locationData.aggregate(
+            Min('value'))['value__min']
+        maxVal = locationData.aggregate(
+            Max('value'))['value__max']
+        avgVal = locationData.aggregate(
+            Avg('value'))['value__avg']
+        data.append({
+            'name': f'{location.city.name}, {location.state.name}, {location.country.name}',
+            'lat': location.lat,
+            'lng': location.lng,
+            'population': stations.count(),
+            'min': minVal if minVal != None else 0,
+            'max': maxVal if maxVal != None else 0,
+            'avg': round(avgVal if avgVal != None else 0, 2),
+            'rows': count_rows,
+            'samples': count_rows
+        })
+        total_rows += count_rows
+        total_samples += count_rows
+
+    startFormatted = start.strftime("%d/%m/%Y") if start != None else " "
+    endFormatted = end.strftime("%d/%m/%Y") if end != None else " "
+
+    data_result["locations"] = [loc.str() for loc in locations]
+    data_result["start"] = startFormatted
+    data_result["end"] = endFormatted
+    data_result["data"] = data
+    data_result["rows"] = total_rows
+    data_result["samples"] = total_samples
+
+    return JsonResponse(data_result)
 
 def download_csv_data(request):
     print("Getting time for csv req")
